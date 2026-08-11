@@ -75,13 +75,6 @@ msg_label = f"💬 消息{' 🔴'+str(total_unread) if total_unread > 0 else ''}
 
 page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"])
 
-elif "💬" in page:
-    import chat_page
-    chat_page.render()
-elif "反馈" in page:
-    import feedback_page
-    feedback_page.render()
-
 # ---------- 核心优化：按需导入（Lazy Loading） ----------
 # 只有点击对应的导航，才导入对应的页面模块
 if "📋" in page:
@@ -93,3 +86,9 @@ elif "🎉" in page:
 elif "👤" in page:
     import profile_page
     profile_page.render()
+elif "💬" in page:
+    import chat_page
+    chat_page.render()
+elif "反馈" in page:
+    import feedback_page
+    feedback_page.render()

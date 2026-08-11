@@ -74,7 +74,6 @@ def get_user_visit_time(username, visit_type):
         return None
 
 # ---------- 任务相关 ----------
-@st.cache_data(ttl=60)
 def add_task(title, desc, publisher):
     url = f"{SUPABASE_URL}/tasks"
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
