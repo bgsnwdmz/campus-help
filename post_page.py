@@ -53,17 +53,56 @@ def render():
                         st.rerun()
                     else:
                         st.error(msg)
+                       
+ # 评论区域        
+st.divider()
+st.subheader("💬 评论区")
+comments = utils.get_comments_with_replies(post_id)
+if comments:
+    for cmt in comments:
+        # 缩进显示回复
+        indent = "  " * (1 if cmt.get('parent_id') else 0)
+        prefix = f"回复 @{cmt['reply_to']}：" if cmt.get('reply_to') else ""
+        st.markdown(f"{indent}**{cmt['display_name']}** · {cmt['created_at'][:16]}")
+        st.markdown(f"{indent}> {prefix}{cmt['content']}")
         
+        # 回复按钮（用户点击后自动填充）
+        if st.button(f"💬 回复", key=f"reply_btn_{cmt['id']}"):
+            # 使用 session_state 临时存储要回复的信息
+            st.session_state["reply_target"] = {
+                "parent_id": cmt['id'],
+                "reply_to": cmt['user_id'],
+                "display_name": cmt['display_name']
+            }
+            st.rerun()
         st.divider()
-        st.subheader("💬 评论区")
-        comments = utils.get_comments(post_id)
-        if comments:
-            for cmt in comments:
-                st.markdown(f"**{cmt['display_name']}** · {cmt['created_at'][:16]}")
-                st.markdown(f"> {cmt['content']}")
+else:
+    st.caption("暂无评论，来说点什么吧！")
+
+# 评论输入框（如果有回复目标则自动带@）
+reply_info = st.session_state.get("reply_target")
+if reply_info:
+    st.info(f"正在回复 @{reply_info['display_name']}，取消回复请刷新页面")
+    default_content = f"@{reply_info['display_name']} "
+else:
+    default_content = ""
+
+with st.form(key=f"comment_form_detail"):
+    comment_content = st.text_input("写评论...", value=default_content)
+    if st.form_submit_button("发送评论"):
+        if comment_content.strip():
+            parent_id = reply_info['parent_id'] if reply_info else None
+            reply_to = reply_info['reply_to'] if reply_info else None
+            if utils.add_comment_with_parent(post_id, st.session_state.nickname, comment_content, parent_id, reply_to):
+                st.success("评论成功！")
+                st.session_state["reply_target"] = None  # 清除回复状态
+                st.rerun()
+            else:
+                st.error("评论失败")
         else:
-            st.caption("暂无评论，来说点什么吧！")
+            st.warning("评论内容不能为空")
         
+
         with st.form(key=f"comment_form_detail"):
             comment_content = st.text_input("写评论...")
             if st.form_submit_button("发送评论"):
@@ -76,23 +115,26 @@ def render():
                 else:
                     st.warning("评论内容不能为空")
     else:
-        # ----- 列表模式 -----
-        st.title("🎉 校园圈")
-        st.caption("匿名吐槽 · 实名评论 · 分享校园生活")
+        # ----- 发帖部分-----
+         with st.expander("📝 发布新帖子", expanded=False):
+         with st.form("post_form"):
+        content = st.text_area("内容", placeholder="分享你的想法...")
         
-        with st.expander("📝 发布新帖子", expanded=False):
-            with st.form("post_form"):
-                content = st.text_area("内容", placeholder="分享你的想法...")
-                is_anonymous = st.checkbox("匿名发布", value=True)
-                if st.form_submit_button("发布"):
-                    if content.strip():
-                        if utils.add_post(st.session_state.nickname, content, is_anonymous):
-                            st.success("发布成功！")
-                            st.rerun()
-                        else:
-                            st.error("发布失败")
-                    else:
-                        st.warning("内容不能为空")
+        # ===== 新增分类下拉框 =====
+        categories = ["吐槽", "求助", "交友", "表白", "其他"]
+        category = st.selectbox("帖子分类", categories, index=0)
+        
+        is_anonymous = st.checkbox("匿名发布", value=True)
+        if st.form_submit_button("发布"):
+            if content.strip():
+                # 调用时传入 category
+                if utils.add_post(st.session_state.nickname, content, is_anonymous, category):
+                    st.success("发布成功！")
+                    st.rerun()
+                else:
+                    st.error("发布失败")
+            else:
+                st.warning("内容不能为空")
         
         posts = utils.get_all_posts()
         if not posts:
@@ -114,18 +156,25 @@ def render():
                             st.rerun()
                     else:
                         st.markdown(f"_{content}_")
-                    
-                    col_btn1, col_btn2 = st.columns([1, 4])
-                    with col_btn1:
-                        if st.button("❤️", key=f"like_list_{post['id']}"):
-                            if utils.like_post(post['id']):
-                                st.rerun()
-                    if post['user_id'] == st.session_state.nickname:
-                        with col_btn2:
-                            if st.button("🗑️ 删除", key=f"del_list_{post['id']}"):
-                                success, msg = utils.delete_post(post['id'], st.session_state.nickname)
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
+
+        category_emoji = {
+               "吐槽": "💢", "求助": "🆘", "交友": "🤝", "表白": "❤️", "其他": "📌"
+           }
+         category_display = f"{category_emoji.get(post.get('category', '其他'), '📌')} {post.get('category', '其他')}"
+        st.markdown(f"**{post['display_name']}** · {post['created_at'][:16]} · `{category_display}`")
+
+
+         # ===== 点赞按钮 ===== 
+         col_btn1, col_btn2 = st.columns([1, 4])
+           with col_btn1:
+        # 检查当前用户是否已点赞
+            has_liked = utils.has_user_liked(post['id'], st.session_state.nickname)
+            button_label = "❤️" if has_liked else "🤍"
+    
+             if st.button(button_label, key=f"like_list_{post['id']}"):
+            success, msg, new_count = utils.toggle_like(post['id'], st.session_state.nickname)
+         if success:
+            st.session_state[f"like_count_{post['id']}"] = new_count
+            st.rerun()
+         else:
+            st.error(msg)

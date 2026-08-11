@@ -5,7 +5,7 @@ import streamlit as st
 import utils  # 只导入工具函数（登录、注册用）
 
 # ---------- 页面配置 ----------
-st.set_page_config(page_title="校园互助站", page_icon="🏫")
+st.set_page_config(page_title="广幼校园互助站", page_icon="🏫")
 
 # ---------- 初始化 Session ----------
 if 'logged_in' not in st.session_state:
@@ -18,7 +18,7 @@ if not st.session_state.logged_in:
         st.session_state.nickname = st.query_params["user"]
 
 # ---------- 侧边栏 ----------
-st.sidebar.title("🏫 校园互助")
+st.sidebar.title("🏫 广幼校园互助")
 
 # ---------- 登录 / 注册界面 ----------
 if not st.session_state.logged_in:
@@ -53,7 +53,7 @@ if not st.session_state.logged_in:
                 else:
                     st.warning("请填完整")
     
-    st.sidebar.info("👈 登录后使用完整功能")
+    st.sidebar.info("👈 注册登录后使用完整功能")
     st.stop()  # 阻止后续代码执行
 
 # ---------- 已登录：显示导航 ----------
@@ -69,8 +69,18 @@ new_tasks = utils.get_new_task_count(st.session_state.nickname)
 new_posts = utils.get_new_post_count(st.session_state.nickname)
 task_label = f"📋 任务广场{' 🔴'+str(new_tasks) if new_tasks > 0 else ''}"
 post_label = f"🎉 校园圈{' 🔴'+str(new_posts) if new_posts > 0 else ''}"
+convs = utils.get_conversations_for_user(st.session_state.nickname)
+total_unread = sum(c['unread'] for c in convs)
+msg_label = f"💬 消息{' 🔴'+str(total_unread) if total_unread > 0 else ''}"
 
-page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心"])
+page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"])
+
+elif "💬" in page:
+    import chat_page
+    chat_page.render()
+elif "反馈" in page:
+    import feedback_page
+    feedback_page.render()
 
 # ---------- 核心优化：按需导入（Lazy Loading） ----------
 # 只有点击对应的导航，才导入对应的页面模块
