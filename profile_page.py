@@ -31,8 +31,11 @@ def render():
                                 st.query_params["other_user"] = task['taker']
                                 st.session_state.page = "💬 消息"
                                 st.rerun()
+                    # 在 tab1 中，任务卡片右侧的按钮区域，替换为：
+
                     with col2:
                         if task["status"] == "已接单":
+                            # 已完成按钮
                             if st.button("✅ 已完成", key=f"complete_{task['id']}"):
                                 success, msg = utils.complete_task(task['id'], st.session_state.nickname)
                                 if success:
@@ -40,8 +43,26 @@ def render():
                                     st.rerun()
                                 else:
                                     st.error(msg)
-                        else:
+                            # 新增：取消接单按钮（仅限接单者操作）
+                            if task.get('taker') == st.session_state.nickname:
+                                if st.button("↩️ 取消接单", key=f"cancel_taken_{task['id']}"):
+                                    success, msg = utils.cancel_taken_task(task['id'], st.session_state.nickname)
+                                    if success:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                        elif task["status"] == "待接单":
                             st.button("⏳ 等待接单", disabled=True)
+                            # 发布者可删除自己的待接单任务
+                            if task['publisher'] == st.session_state.nickname:
+                                if st.button("🗑️ 删除", key=f"del_my_task_{task['id']}"):
+                                    success, msg = utils.delete_task(task['id'], st.session_state.nickname)
+                                    if success:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
     
     with tab2:
         st.caption("这里显示你「接单且未完成」的需求。")

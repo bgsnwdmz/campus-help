@@ -32,18 +32,30 @@ def render():
                     st.warning("请填完整")
     
     # 任务列表
-    tasks = utils.get_public_tasks()
-    if not tasks:
-        st.info("🎉 广场很干净，暂无待接单的需求。")
-    else:
-        for task in tasks:
-            with st.container(border=True):
-                col_left, col_right = st.columns([4, 1])
-                with col_left:
-                    st.markdown(f"🟢 **{task['title']}**")
-                    st.caption(f"👤 {task['publisher']}  |  🕒 {task['pub_time']}")
-                    st.text(task['description'])
-                with col_right:
+tasks = utils.get_public_tasks()
+if not tasks:
+    st.info("🎉 广场很干净，暂无待接单的需求。")
+else:
+    for task in tasks:
+        with st.container(border=True):
+            col_left, col_right = st.columns([4, 1])
+            with col_left:
+                st.markdown(f"🟢 **{task['title']}**")
+                st.caption(f"👤 {task['publisher']}  |  🕒 {task['pub_time']}")
+                st.text(task['description'])
+            with col_right:
+                # ===== 操作按钮区域 =====
+                # 如果是发布者，显示"删除"按钮
+                if task['publisher'] == st.session_state.nickname:
+                    if st.button("🗑️ 删除", key=f"del_task_{task['id']}"):
+                        success, msg = utils.delete_task(task['id'], st.session_state.nickname)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                else:
+                    # 非发布者显示"接单"按钮
                     if st.button("✋ 我来接", key=f"pub_{task['id']}"):
                         success, msg = utils.accept_task(task['id'], st.session_state.nickname)
                         if success:

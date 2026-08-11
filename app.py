@@ -69,11 +69,16 @@ new_tasks = utils.get_new_task_count(st.session_state.nickname)
 new_posts = utils.get_new_post_count(st.session_state.nickname)
 task_label = f"📋 任务广场{' 🔴'+str(new_tasks) if new_tasks > 0 else ''}"
 post_label = f"🎉 校园圈{' 🔴'+str(new_posts) if new_posts > 0 else ''}"
-convs = utils.get_conversations_for_user(st.session_state.nickname)
-total_unread = sum(c['unread'] for c in convs)
-msg_label = f"💬 消息{' 🔴'+str(total_unread) if total_unread > 0 else ''}"
 
-page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"])
+try:
+    convs = utils.get_conversations_for_user(st.session_state.nickname)
+    total_unread = sum(c['unread'] for c in convs)
+    msg_label = f"💬 消息{' 🔴'+str(total_unread) if total_unread > 0 else ''}"
+except Exception as e:
+    # 如果消息表不存在或查询失败，直接显示不带红点的消息按钮
+    msg_label = "💬 消息"
+
+page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"，"⚙️ 我的资料"])
 
 # ---------- 核心优化：按需导入（Lazy Loading） ----------
 # 只有点击对应的导航，才导入对应的页面模块
@@ -92,3 +97,6 @@ elif "💬" in page:
 elif "反馈" in page:
     import feedback_page
     feedback_page.render()
+elif "⚙️" in page:
+    import profile_edit_page
+    profile_edit_page.render()

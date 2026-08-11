@@ -143,6 +143,75 @@ def complete_task(task_id, current_user):
     except:
         return False, "出错"
 
+
+def delete_task(task_id, current_user):
+    """
+    发布者删除自己的任务（仅限待接单状态）
+    返回: (success, message)
+    """
+    # 1. 先查询任务状态和发布者
+    url_check = f"{SUPABASE_URL}/tasks?select=publisher,status&id=eq.{task_id}"
+    try:
+        response = requests.get(url_check, headers=get_headers())
+        if response.status_code != 200 or not response.json():
+            return False, "任务不存在"
+        
+        task = response.json()[0]
+        
+        # 2. 权限校验：必须是发布者
+        if task["publisher"] != current_user:
+            return False, "只有发布者可以删除此任务"
+        
+        # 3. 状态校验：只有待接单才能删除
+        if task["status"] != "待接单":
+            return False, "任务已被接单，无法删除。如需取消，请联系接单方。"
+        
+        # 4. 执行删除（软删除：将状态改为已删除）
+        url_update = f"{SUPABASE_URL}/tasks?id=eq.{task_id}"
+        response = requests.patch(url_update, headers=get_headers(), json={
+            "status": "已删除",
+            "cancelled_by": current_user,
+            "cancelled_at": datetime.datetime.now().isoformat()
+        })
+        return (True, "任务已删除") if response.status_code in [200, 204] else (False, "删除失败")
+    except Exception as e:
+        return False, f"出错: {str(e)}"
+
+
+def cancel_taken_task(task_id, current_user):
+    """
+    接单者取消已接单的任务
+    返回: (success, message)
+    """
+    # 1. 先查询任务状态和接单人
+    url_check = f"{SUPABASE_URL}/tasks?select=taker,status,publisher&id=eq.{task_id}"
+    try:
+        response = requests.get(url_check, headers=get_headers())
+        if response.status_code != 200 or not response.json():
+            return False, "任务不存在"
+        
+        task = response.json()[0]
+        
+        # 2. 权限校验：必须是接单者
+        if task.get("taker") != current_user:
+            return False, "只有接单者可以取消接单"
+        
+        # 3. 状态校验：只有已接单才能取消
+        if task["status"] != "已接单":
+            return False, "任务当前状态不允许取消接单"
+        
+        # 4. 执行取消：将状态改回待接单，清空接单人
+        url_update = f"{SUPABASE_URL}/tasks?id=eq.{task_id}"
+        response = requests.patch(url_update, headers=get_headers(), json={
+            "status": "待接单",
+            "taker": "",
+            "cancelled_by": current_user,
+            "cancelled_at": datetime.datetime.now().isoformat()
+        })
+        return (True, "已取消接单，任务已重新上架") if response.status_code in [200, 204] else (False, "取消失败")
+    except Exception as e:
+        return False, f"出错: {str(e)}"
+
 @st.cache_data(ttl=60)
 def get_new_task_count(username):
     last_visit = get_user_visit_time(username, "task")
@@ -451,8 +520,6 @@ def get_conversations_for_user(username):
     获取当前用户的所有会话（基于任务）
     返回列表：[{'task_id': ..., 'other_user': ..., 'last_msg': ..., 'unread': 0}]
     """
-    # 1. 获取当前用户参与的所有任务（发布或接单）
-    # 简化：从 tasks 表中查询
     url_tasks = f"{SUPABASE_URL}/tasks?select=id,title,publisher,taker&or=(publisher.eq.{username},taker.eq.{username})"
     try:
         resp = requests.get(url_tasks, headers=get_headers())
@@ -461,14 +528,15 @@ def get_conversations_for_user(username):
         tasks = resp.json()
         convs = []
         for task in tasks:
-            other = task['taker'] if task['publisher'] == username else task['publisher']
-            if not other:
+            # 处理 taker 为空的情况
+            other = task.get('taker') if task.get('publisher') == username else task.get('publisher')
+            if not other or other == '':
                 continue
             # 获取该任务的最新一条消息
             url_msg = f"{SUPABASE_URL}/messages?select=*&task_id=eq.{task['id']}&order=created_at.desc&limit=1"
             msg_resp = requests.get(url_msg, headers=get_headers())
             last_msg = msg_resp.json()[0] if msg_resp.status_code == 200 and msg_resp.json() else None
-            # 未读消息数（当前用户为接收者且is_read=false）
+            # 未读消息数
             url_unread = f"{SUPABASE_URL}/messages?select=id&task_id=eq.{task['id']}&to_user=eq.{username}&is_read=eq.false"
             unread_resp = requests.get(url_unread, headers=get_headers())
             unread_count = len(unread_resp.json()) if unread_resp.status_code == 200 else 0
@@ -486,7 +554,7 @@ def get_conversations_for_user(username):
                 'unread': unread_count
             })
         return convs
-    except:
+    except Exception as e:
         return []
 
 def mark_messages_read(username, task_id=None):
