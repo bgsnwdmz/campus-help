@@ -8,6 +8,9 @@ import io
 def render():
     st.title("👤 我的资料")
     
+    # ----- 获取 Supabase 基础域名（不含 /rest/v1）-----
+    base_url = utils.SUPABASE_URL.replace("/rest/v1", "")
+    
     # 获取当前用户信息
     username = st.session_state.nickname
     url = f"{utils.SUPABASE_URL}/users?select=*&username=eq.{username}"
@@ -24,7 +27,15 @@ def render():
     # ----- 显示当前信息 -----
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.image("https://img.icons8.com/fluency/96/000000/user.png", width=100)
+        avatar_url = user_info.get('avatar_url')
+        if avatar_url:
+            # 使用 HTML img 标签 + 时间戳强制刷新缓存
+            st.markdown(
+                f'<img src="{avatar_url}?t={int(time.time())}" width="100" style="border-radius:50%; object-fit:cover;">',
+                unsafe_allow_html=True
+            )
+        else:
+            st.image("https://img.icons8.com/fluency/96/000000/user.png", width=100)
     with col2:
         st.markdown(f"**账号**：{user_info['username']}")
         st.markdown(f"**昵称**：{user_info['nickname']}")
@@ -63,7 +74,6 @@ def render():
                 elif len(new_pwd) < 6:
                     st.warning("密码长度至少6位")
                 else:
-                    # 验证旧密码
                     if utils.login_user(username, old_pwd):
                         url_update = f"{utils.SUPABASE_URL}/users?username=eq.{username}"
                         data = {"password": utils.hash_password(new_pwd)}
@@ -77,39 +87,4 @@ def render():
                     else:
                         st.error("当前密码错误")
     
-    # ----- 上传头像（Supabase Storage）-----
-    with st.expander("📷 更换头像", expanded=False):
-        st.info("💡 头像将存储在 Supabase Storage，建议上传 200x200 以内的图片")
-        uploaded_file = st.file_uploader("选择图片", type=["jpg", "png", "jpeg"])
-        
-        if uploaded_file is not None:
-            # 压缩图片
-            image = Image.open(uploaded_file)
-            # 压缩到 200x200
-            image.thumbnail((200, 200))
-            
-            # 转成字节
-            img_bytes = io.BytesIO()
-            image.save(img_bytes, format='JPEG', quality=80)
-            img_bytes = img_bytes.getvalue()
-            
-            # 上传到 Supabase Storage
-            storage_url = f"{utils.SUPABASE_URL}/storage/v1/object/public/avatars/{username}.jpg"
-            headers = {
-                "apikey": utils.SUPABASE_KEY,
-                "Authorization": f"Bearer {utils.SUPABASE_KEY}",
-                "Content-Type": "image/jpeg"
-            }
-            
-            try:
-                resp = requests.post(storage_url, headers=headers, data=img_bytes)
-                if resp.status_code in [200, 201]:
-                    st.success("头像上传成功！")
-                    # 更新用户表中的头像字段
-                    url_update = f"{utils.SUPABASE_URL}/users?username=eq.{username}"
-                    data = {"avatar_url": f"{utils.SUPABASE_URL}/storage/v1/object/public/avatars/{username}.jpg"}
-                    requests.patch(url_update, headers=utils.get_headers(), json=data)
-                else:
-                    st.error("上传失败，请稍后重试")
-            except:
-                st.error("上传失败，请检查网络")
+   

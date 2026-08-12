@@ -7,6 +7,35 @@ import requests
 
 def render():
     st.title("👤 个人中心")
+        # ----- 修改昵称（整合自“我的资料”）-----
+    with st.expander("✏️ 修改昵称", expanded=False):
+        # 获取当前用户信息（只查昵称）
+        username = st.session_state.nickname
+        url = f"{utils.SUPABASE_URL}/users?select=nickname&username=eq.{username}"
+        try:
+            response = requests.get(url, headers=utils.get_headers())
+            if response.status_code == 200 and response.json():
+                current_nick = response.json()[0]['nickname']
+            else:
+                current_nick = username
+        except:
+            current_nick = username
+
+        with st.form("update_nickname_from_profile"):
+            new_nick = st.text_input("新昵称", value=current_nick)
+            if st.form_submit_button("更新昵称"):
+                if new_nick.strip():
+                    url_update = f"{utils.SUPABASE_URL}/users?username=eq.{username}"
+                    data = {"nickname": new_nick}
+                    resp = requests.patch(url_update, headers=utils.get_headers(), json=data)
+                    if resp.status_code in [200, 204]:
+                        st.success("昵称更新成功！")
+                        st.session_state.nickname = new_nick
+                        st.rerun()
+                    else:
+                        st.error("更新失败")
+                else:
+                    st.warning("昵称不能为空")
     tab1, tab2, tab3 = st.tabs(["📤 我发布的", "📥 我接的单", "📝 我的帖子"])
     
     with tab1:
