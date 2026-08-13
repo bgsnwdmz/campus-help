@@ -60,7 +60,7 @@ def render():
                                 st.query_params["other_user"] = task['taker']
                                 st.session_state.page = "💬 消息"
                                 st.rerun()
-                    # 在 tab1 中，任务卡片右侧的按钮区域，替换为：
+                    
 
                     with col2:
                         if task["status"] == "已接单":
@@ -82,7 +82,7 @@ def render():
                                     else:
                                         st.error(msg)
                         elif task["status"] == "待接单":
-                            st.button("⏳ 等待接单", disabled=True)
+                            st.button("⏳ 等待接单", disabled=True, key=f"waiting_{task['id']}")
                             # 发布者可删除自己的待接单任务
                             if task['publisher'] == st.session_state.nickname:
                                 if st.button("🗑️ 删除", key=f"del_my_task_{task['id']}"):

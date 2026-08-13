@@ -111,7 +111,9 @@ def render():
     
     else:
         # ----- 列表模式 -----
-        st.title("🎉 校园圈")
+    if 'post_page' not in st.session_state:
+        st.session_state.post_page = 1
+            st.title("🎉 校园圈")
         st.caption("匿名吐槽 · 实名评论 · 分享校园生活")
         
         # 发帖表单
@@ -179,3 +181,10 @@ def render():
                                     st.rerun()
                                 else:
                                     st.error(msg)
+                                    
+                     if st.session_state.post_page * 10 < total:
+                        if st.button("📥 加载更多帖子"):
+                            st.session_state.post_page += 1
+                            st.rerun()
+                    else:
+                        st.caption("— 已加载全部帖子 —")               

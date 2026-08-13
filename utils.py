@@ -5,6 +5,7 @@ import streamlit as st
 import requests
 import datetime
 import hashlib
+import datetime
 
 # ---------- 配置 ----------
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -74,10 +75,18 @@ def get_user_visit_time(username, visit_type):
         return None
 
 # ---------- 任务相关 ----------
-def add_task(title, desc, publisher):
+def add_task(title, desc, publisher, deadline=None):
     url = f"{SUPABASE_URL}/tasks"
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    data = {"title": title, "description": desc, "publisher": publisher, "pub_time": now, "status": "待接单", "taker": ""}
+    data = {
+        "title": title,
+        "description": desc,
+        "publisher": publisher,
+        "pub_time": now,
+        "status": "待接单",
+        "taker": "",
+        "deadline": deadline  # 新增字段，可以为 None
+    }
     try:
         response = requests.post(url, headers=get_headers(), json=data)
         return response.status_code in [200, 201]
@@ -85,7 +94,7 @@ def add_task(title, desc, publisher):
         return False
 
 def get_public_tasks():
-    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time&status=eq.待接单&order=id.desc"
+    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc"
     try:
         response = requests.get(url, headers=get_headers())
         return response.json() if response.status_code == 200 else []
@@ -93,7 +102,9 @@ def get_public_tasks():
         return []
 
 def get_my_published_tasks(nickname):
-    url = f"{SUPABASE_URL}/tasks?select=*&publisher=eq.{nickname}&status=neq.已完成&order=id.desc"
+    """获取当前用户发布的、未过期且未完成的任务（待接单或已接单）"""
+    now = datetime.datetime.now().isoformat()
+    url = f"{SUPABASE_URL}/tasks?select=*&publisher=eq.{nickname}&status=in.(待接单,已接单)&or=(deadline.is.null,deadline.gt.{now})&order=id.desc"
     try:
         response = requests.get(url, headers=get_headers())
         return response.json() if response.status_code == 200 else []
@@ -101,7 +112,9 @@ def get_my_published_tasks(nickname):
         return []
 
 def get_my_taken_tasks(nickname):
-    url = f"{SUPABASE_URL}/tasks?select=*&taker=eq.{nickname}&status=neq.已完成&order=id.desc"
+    """获取当前用户已接单、未过期且未完成的任务（已接单）"""
+    now = datetime.datetime.now().isoformat()
+    url = f"{SUPABASE_URL}/tasks?select=*&taker=eq.{nickname}&status=eq.已接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc"
     try:
         response = requests.get(url, headers=get_headers())
         return response.json() if response.status_code == 200 else []
@@ -212,12 +225,13 @@ def cancel_taken_task(task_id, current_user):
     except Exception as e:
         return False, f"出错: {str(e)}"
 
-@st.cache_data(ttl=60)
+
 def get_new_task_count(username):
     last_visit = get_user_visit_time(username, "task")
     if not last_visit:
         return 0
-    url = f"{SUPABASE_URL}/tasks?select=id&status=eq.待接单&pub_time=gt.{last_visit}"
+    now = datetime.datetime.now().isoformat()
+    url = f"{SUPABASE_URL}/tasks?select=id&status=eq.待接单&pub_time=gt.{last_visit}&or=(deadline.is.null,deadline.gt.{now})"
     try:
         response = requests.get(url, headers=get_headers())
         return len(response.json()) if response.status_code == 200 else 0
@@ -241,7 +255,6 @@ def add_post(user_id, content, is_anonymous, category):
     except:
         return False
 
-@st.cache_data(ttl=60)
 def get_all_posts(limit=50):
     url_posts = f"{SUPABASE_URL}/posts?select=*&status=eq.正常&order=created_at.desc&limit={limit}"
     try:
@@ -286,7 +299,6 @@ def get_post_by_id(post_id):
     except:
         return None
 
-@st.cache_data(ttl=60)
 def get_new_post_count(username):
     last_visit = get_user_visit_time(username, "post")
     if not last_visit:
@@ -582,3 +594,50 @@ def submit_feedback(user_id, content):
         return response.status_code in [200, 201]
     except:
         return False
+
+# ---------- 分页查询 ----------
+def get_public_tasks_page(page=1, per_page=10):
+    offset = (page - 1) * per_page
+    now = datetime.datetime.now().isoformat()
+    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc&limit={per_page}&offset={offset}"
+    try:
+        response = requests.get(url, headers=get_headers())
+        tasks = response.json() if response.status_code == 200 else []
+        # 获取总数（同样要过滤过期）
+        count_url = f"{SUPABASE_URL}/tasks?select=id&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})"
+        count_resp = requests.get(count_url, headers=get_headers())
+        total = len(count_resp.json()) if count_resp.status_code == 200 else 0
+        return tasks, total
+    except:
+        return [], 0
+
+def get_all_posts_page(page=1, per_page=10):
+    """分页获取正常帖子，按创建时间降序，返回 (posts, total_count)"""
+    offset = (page - 1) * per_page
+    url_posts = f"{SUPABASE_URL}/posts?select=*&status=eq.正常&order=created_at.desc&limit={per_page}&offset={offset}"
+    try:
+        response = requests.get(url_posts, headers=get_headers())
+        if response.status_code != 200:
+            return [], 0
+        posts = response.json()
+        # 补充评论数和显示名称
+        for post in posts:
+            url_count = f"{SUPABASE_URL}/comments?select=id&post_id=eq.{post['id']}&status=eq.正常"
+            count_resp = requests.get(url_count, headers=get_headers())
+            post["comment_count"] = len(count_resp.json()) if count_resp.status_code == 200 else 0
+            if post["is_anonymous"]:
+                post["display_name"] = "匿名同学"
+            else:
+                url_user = f"{SUPABASE_URL}/users?select=nickname&username=eq.{post['user_id']}"
+                user_resp = requests.get(url_user, headers=get_headers())
+                if user_resp.status_code == 200 and user_resp.json():
+                    post["display_name"] = user_resp.json()[0]["nickname"]
+                else:
+                    post["display_name"] = post["user_id"]
+        # 获取总数
+        count_url = f"{SUPABASE_URL}/posts?select=id&status=eq.正常"
+        count_resp = requests.get(count_url, headers=get_headers())
+        total = len(count_resp.json()) if count_resp.status_code == 200 else 0
+        return posts, total
+    except:
+        return [], 0       
