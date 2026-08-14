@@ -111,9 +111,11 @@ def render():
     
     else:
         # ----- 列表模式 -----
-    if 'post_page' not in st.session_state:
-        st.session_state.post_page = 1
-            st.title("🎉 校园圈")
+        # 初始化分页状态
+        if 'post_page' not in st.session_state:
+            st.session_state.post_page = 1
+        
+        st.title("🎉 校园圈")
         st.caption("匿名吐槽 · 实名评论 · 分享校园生活")
         
         # 发帖表单
@@ -133,8 +135,9 @@ def render():
                     else:
                         st.warning("内容不能为空")
         
-        # 帖子列表
-        posts = utils.get_all_posts()
+        # 帖子列表（分页加载）
+        posts, total = utils.get_all_posts_page(st.session_state.post_page, per_page=10)
+        
         if not posts:
             st.info("📭 暂无帖子")
         else:
@@ -181,10 +184,11 @@ def render():
                                     st.rerun()
                                 else:
                                     st.error(msg)
-                                    
-                     if st.session_state.post_page * 10 < total:
-                        if st.button("📥 加载更多帖子"):
-                            st.session_state.post_page += 1
-                            st.rerun()
-                    else:
-                        st.caption("— 已加载全部帖子 —")               
+            
+            # 加载更多
+            if st.session_state.post_page * 10 < total:
+                if st.button("📥 加载更多帖子"):
+                    st.session_state.post_page += 1
+                    st.rerun()
+            else:
+                st.caption("— 已加载全部帖子 —")
