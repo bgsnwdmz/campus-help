@@ -6,6 +6,8 @@ import requests
 import datetime
 import hashlib
 import datetime
+import io
+from PIL import Image
 
 # ---------- 配置 ----------
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -75,7 +77,7 @@ def get_user_visit_time(username, visit_type):
         return None
 
 # ---------- 任务相关 ----------
-def add_task(title, desc, publisher, deadline=None):
+def add_task(title, desc, publisher, deadline=None, image_url=None):
     url = f"{SUPABASE_URL}/tasks"
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     data = {
@@ -85,7 +87,8 @@ def add_task(title, desc, publisher, deadline=None):
         "pub_time": now,
         "status": "待接单",
         "taker": "",
-        "deadline": deadline  # 新增字段，可以为 None
+        "deadline": deadline,
+        "image_url": image_url  # 新增字段
     }
     try:
         response = requests.post(url, headers=get_headers(), json=data)
@@ -240,14 +243,15 @@ def get_new_task_count(username):
 
 # ---------- 帖子相关 ----------
 
-def add_post(user_id, content, is_anonymous, category):
+def add_post(user_id, content, is_anonymous, category, image_url=None):
     url = f"{SUPABASE_URL}/posts"
     data = {
         "user_id": user_id,
         "content": content,
         "is_anonymous": is_anonymous,
-        "category": category,  # 新增
-        "created_at": datetime.datetime.now().isoformat()
+        "category": category,
+        "created_at": datetime.datetime.now().isoformat(),
+        "image_url": image_url  # 新增字段
     }
     try:
         response = requests.post(url, headers=get_headers(), json=data)
@@ -599,7 +603,7 @@ def submit_feedback(user_id, content):
 def get_public_tasks_page(page=1, per_page=10):
     offset = (page - 1) * per_page
     now = datetime.datetime.now().isoformat()
-    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc&limit={per_page}&offset={offset}"
+    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time,image_url&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc&limit={per_page}&offset={offset}"
     try:
         response = requests.get(url, headers=get_headers())
         tasks = response.json() if response.status_code == 200 else []
@@ -641,3 +645,287 @@ def get_all_posts_page(page=1, per_page=10):
         return posts, total
     except:
         return [], 0       
+
+ # ==========================================
+# 追加到 utils.py 末尾（管理员相关）
+# ==========================================
+
+# ---------- 管理员配置（硬编码白名单，后续可迁移到数据库） ----------
+# 🔥 重要：把下面列表里的 "你的用户名" 改成你自己的登录账号！
+ADMIN_WHITELIST = ["1", "admin"]  # 可以加多个
+
+def is_admin_user(username):
+    """判断当前用户是否为管理员"""
+    if not username:
+        return False
+    return username in ADMIN_WHITELIST
+
+# ---------- 管理后台专用查询（不过滤任何状态） ----------
+
+def admin_get_all_users():
+    """获取所有用户（用于管理面板）"""
+    url = f"{SUPABASE_URL}/users?select=username,nickname,avatar_url,last_task_visit,last_post_visit&order=username.asc"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        return resp.json() if resp.status_code == 200 else []
+    except:
+        return []
+
+def admin_get_all_tasks():
+    """获取所有任务（含已删除、已过期），按发布时间降序"""
+    url = f"{SUPABASE_URL}/tasks?select=*&order=id.desc"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        return resp.json() if resp.status_code == 200 else []
+    except:
+        return []
+
+def admin_get_all_posts():
+    """获取所有帖子（含已删除），按发布时间降序"""
+    url = f"{SUPABASE_URL}/posts?select=*&order=id.desc"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        return resp.json() if resp.status_code == 200 else []
+    except:
+        return []
+
+def admin_get_all_feedbacks():
+    """获取所有反馈，按时间降序"""
+    url = f"{SUPABASE_URL}/feedbacks?select=*&order=id.desc"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        return resp.json() if resp.status_code == 200 else []
+    except:
+        return []
+
+def admin_delete_task_force(task_id):
+    """管理员强制删除任务（物理删除，谨慎）"""
+    url = f"{SUPABASE_URL}/tasks?id=eq.{task_id}"
+    try:
+        resp = requests.delete(url, headers=get_headers())
+        return resp.status_code in [200, 204]
+    except:
+        return False
+
+def admin_delete_post_force(post_id):
+    """管理员强制删除帖子（物理删除）"""
+    url = f"{SUPABASE_URL}/posts?id=eq.{post_id}"
+    try:
+        resp = requests.delete(url, headers=get_headers())
+        return resp.status_code in [200, 204]
+    except:
+        return False
+
+def admin_mark_feedback_done(feedback_id):
+    """管理员标记反馈为已处理（软标记，需在 feedbacks 表加 status 字段）"""
+    # 注意：如果 feedbacks 表没有 status 字段，需要先 ALTER TABLE 添加
+    url = f"{SUPABASE_URL}/feedbacks?id=eq.{feedback_id}"
+    try:
+        resp = requests.patch(url, headers=get_headers(), json={"status": "已处理"})
+        return resp.status_code in [200, 204]
+    except:
+        return False       
+
+# ==========================================
+# 追加到 utils.py 末尾（统计看板相关）
+# ==========================================
+
+import pandas as pd
+from collections import defaultdict
+import datetime as dt
+
+def admin_get_stats_summary():
+    """
+    获取平台核心统计数据
+    返回字典：用户总数、各状态任务数、各状态帖子数、各状态反馈数
+    """
+    stats = {
+        "total_users": 0,
+        "tasks": {"待接单": 0, "已接单": 0, "已完成": 0, "已删除": 0},
+        "posts": {"正常": 0, "已删除": 0},
+        "feedbacks": {"待处理": 0, "已处理": 0}
+    }
+    
+    # 1. 用户总数
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/users?select=username", headers=get_headers())
+        if resp.status_code == 200:
+            stats["total_users"] = len(resp.json())
+    except:
+        pass
+    
+    # 2. 任务状态统计
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/tasks?select=status", headers=get_headers())
+        if resp.status_code == 200:
+            for task in resp.json():
+                status = task.get("status", "未知")
+                if status in stats["tasks"]:
+                    stats["tasks"][status] += 1
+    except:
+        pass
+    
+    # 3. 帖子状态统计
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/posts?select=status", headers=get_headers())
+        if resp.status_code == 200:
+            for post in resp.json():
+                status = post.get("status", "未知")
+                if status in stats["posts"]:
+                    stats["posts"][status] += 1
+    except:
+        pass
+    
+    # 4. 反馈状态统计（如果 feedbacks 表没有 status 字段，默认为"待处理"）
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/feedbacks?select=status", headers=get_headers())
+        if resp.status_code == 200:
+            for fb in resp.json():
+                status = fb.get("status", "待处理")
+                if status in stats["feedbacks"]:
+                    stats["feedbacks"][status] += 1
+        else:
+            # 如果表没有 status 字段，全部算作待处理
+            resp2 = requests.get(f"{SUPABASE_URL}/feedbacks?select=id", headers=get_headers())
+            if resp2.status_code == 200:
+                stats["feedbacks"]["待处理"] = len(resp2.json())
+    except:
+        pass
+    
+    return stats
+
+
+def admin_get_daily_trends(days=7):
+    """
+    获取近 N 天每日新增任务和帖子数量
+    返回 pandas DataFrame，列：日期, 新增任务, 新增帖子
+    """
+    # 计算起始日期
+    end_date = dt.date.today()
+    start_date = end_date - dt.timedelta(days=days - 1)
+    
+    # 初始化字典
+    date_range = [start_date + dt.timedelta(days=i) for i in range(days)]
+    date_strs = [d.isoformat() for d in date_range]
+    
+    task_counts = defaultdict(int)
+    post_counts = defaultdict(int)
+    
+    # 1. 获取任务发布时间（只取 pub_time 日期部分）
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/tasks?select=pub_time", headers=get_headers())
+        if resp.status_code == 200:
+            for task in resp.json():
+                pub = task.get("pub_time", "")
+                if pub:
+                    # pub_time 格式："YYYY-MM-DD HH:MM"
+                    date_part = pub[:10]  # 取前10位
+                    if date_part in date_strs:
+                        task_counts[date_part] += 1
+    except:
+        pass
+    
+    # 2. 获取帖子创建时间
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/posts?select=created_at", headers=get_headers())
+        if resp.status_code == 200:
+            for post in resp.json():
+                created = post.get("created_at", "")
+                if created:
+                    # created_at 格式："YYYY-MM-DDTHH:MM:SS..."
+                    date_part = created[:10]
+                    if date_part in date_strs:
+                        post_counts[date_part] += 1
+    except:
+        pass
+    
+    # 构建 DataFrame
+    data = []
+    for d in date_range:
+        d_str = d.isoformat()
+        data.append({
+            "日期": d_str,
+            "新增任务": task_counts.get(d_str, 0),
+            "新增帖子": post_counts.get(d_str, 0)
+        })
+    
+    df = pd.DataFrame(data)
+    # 格式化日期显示（如 "08-15"）
+    df["日期显示"] = pd.to_datetime(df["日期"]).dt.strftime("%m-%d")
+    return df  
+
+# ==========================================
+# 图片上传与压缩（追加到 utils.py 末尾）
+# ==========================================
+
+def compress_image(file_bytes, max_width=800, quality=75):
+    """
+    压缩图片，返回压缩后的 bytes 和文件后缀
+    - 最大宽度 800px（等比缩放）
+    - JPEG 质量 75%
+    - 输出格式：JPEG
+    """
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        
+        # 转换为 RGB（防止 RGBA 无法保存为 JPEG）
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        
+        # 等比缩放
+        if img.width > max_width:
+            ratio = max_width / img.width
+            new_size = (max_width, int(img.height * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # 压缩到内存
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=quality, optimize=True)
+        return output.getvalue()
+    except Exception as e:
+        # 如果压缩失败，返回原数据（但后续上传可能会因体积过大失败）
+        print(f"压缩失败: {e}")
+        return file_bytes
+
+
+def upload_image_to_supabase(file_bytes, bucket_name, username, file_extension="jpg"):
+    """
+    上传图片到 Supabase Storage
+    返回：公开 URL 或 None
+    """
+    if not file_bytes:
+        return None
+    
+    # 1. 压缩图片
+    compressed_bytes = compress_image(file_bytes)
+    
+    # 2. 生成唯一文件名
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"{username}_{timestamp}.jpg"
+    
+    # 3. 构造 Storage API URL
+    base_url = SUPABASE_URL.replace("/rest/v1", "")  # 去掉 /rest/v1
+    storage_url = f"{base_url}/storage/v1/object/{bucket_name}/{file_name}"
+    
+    # 4. 上传
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "image/jpeg",
+        "x-upsert": "true"
+    }
+    
+    try:
+        response = requests.put(storage_url, headers=headers, data=compressed_bytes)
+        # ----- 调试信息 -----
+        if response.status_code not in [200, 201]:
+            st.error(f"上传失败，状态码：{response.status_code}")
+            st.error(f"响应内容：{response.text}")
+            return None
+        # 返回公开 URL
+        public_url = f"{base_url}/storage/v1/object/public/{bucket_name}/{file_name}"
+        return public_url
+    except Exception as e:
+        st.error(f"上传异常：{str(e)}")
+        return None
+       

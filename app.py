@@ -86,7 +86,12 @@ except Exception as e:
     # 如果消息表不存在或查询失败，直接显示不带红点的消息按钮
     msg_label = "💬 消息"
 
-page = st.sidebar.radio("导航", [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"])
+nav_items = [task_label, post_label, "👤 个人中心", msg_label, "📢 反馈"]
+# 如果是管理员，在最后追加“管理后台”
+if utils.is_admin_user(st.session_state.nickname):
+    nav_items.append("⚙️ 管理后台")
+
+page = st.sidebar.radio("导航", nav_items)
 
 # ---------- 核心优化：按需导入（Lazy Loading） ----------
 # 只有点击对应的导航，才导入对应的页面模块
@@ -105,3 +110,6 @@ elif "💬" in page:
 elif "反馈" in page:
     import feedback_page
     feedback_page.render()
+elif "⚙️" in page:
+    import admin_page  # 新建的管理后台
+    admin_page.render()    

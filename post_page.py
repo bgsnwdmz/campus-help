@@ -111,23 +111,47 @@ def render():
     
     else:
         # ----- 列表模式 -----
-        # 初始化分页状态
         if 'post_page' not in st.session_state:
             st.session_state.post_page = 1
         
         st.title("🎉 校园圈")
         st.caption("匿名吐槽 · 实名评论 · 分享校园生活")
         
-        # 发帖表单
+        # ----- 发布表单（完整正确版）-----
         with st.expander("📝 发布新帖子", expanded=False):
             with st.form("post_form"):
                 content = st.text_area("内容", placeholder="分享你的想法...")
                 categories = ["吐槽", "求助", "交友", "表白", "其他"]
                 category = st.selectbox("帖子分类", categories, index=0)
                 is_anonymous = st.checkbox("匿名发布", value=True)
-                if st.form_submit_button("发布"):
+                
+                # 图片上传
+                uploaded_file = st.file_uploader(
+                    "📷 配图（可选）", 
+                    type=["jpg", "jpeg", "png", "webp"],
+                    help="建议上传 1MB 以内的图片，系统会自动压缩"
+                )
+                
+                # 提交按钮（必须在 with st.form 内部）
+                submitted = st.form_submit_button("发布")
+                
+                if submitted:
                     if content.strip():
-                        if utils.add_post(st.session_state.nickname, content, is_anonymous, category):
+                        # 处理图片上传
+                        image_url = None
+                        if uploaded_file is not None:
+                            file_bytes = uploaded_file.getvalue()
+                            image_url = utils.upload_image_to_supabase(
+                                file_bytes, 
+                                "post_images", 
+                                st.session_state.nickname
+                            )
+                            if image_url:
+                                st.success("📷 图片上传成功！")
+                            else:
+                                st.warning("图片上传失败，帖子将不带图片发布")
+                        
+                        if utils.add_post(st.session_state.nickname, content, is_anonymous, category, image_url):
                             st.success("发布成功！")
                             st.rerun()
                         else:
@@ -143,6 +167,8 @@ def render():
         else:
             for post in posts:
                 with st.container(border=True):
+                    if post.get('image_url'):
+                        st.image(post['image_url'], width=200, caption="配图")
                     # 帖子头部（含分类）
                     category_emoji = {"吐槽": "💢", "求助": "🆘", "交友": "🤝", "表白": "❤️", "其他": "📌"}
                     cat_display = f"{category_emoji.get(post.get('category', '其他'), '📌')} {post.get('category', '其他')}"

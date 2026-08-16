@@ -26,17 +26,38 @@ def render():
             deadline = st.date_input(
                 "截止日期（必填）", 
                 value=datetime.date.today(),
-                help="超过此日期任务将自动从广场消失，建议选明天或更晚"
+                help="超过此日期任务将自动从广场消失，建议选明天或更晚"  
             )
+            # ---------- 图片上传 ----------
+            uploaded_file = st.file_uploader(
+                "📷 配图（可选）", 
+                type=["jpg", "jpeg", "png", "webp"],
+                help="上传图片，系统会自动压缩"
+)
             
             if st.form_submit_button("发布"):
                 if task_title and task_desc:
-                    # 截止时间转为 ISO 格式字符串（当天 23:59:59）
+                    # 处理图片上传
+                    image_url = None
+                    if uploaded_file is not None:
+                        # 读取文件字节
+                        file_bytes = uploaded_file.getvalue()
+                        # 上传到 Supabase
+                        image_url = utils.upload_image_to_supabase(
+                            file_bytes, 
+                            "task_images", 
+                            st.session_state.nickname
+                        )
+                        if image_url:
+                            st.success("📷 图片上传成功！")
+                        else:
+                            st.warning("图片上传失败，任务将不带图片发布")
+                    
                     deadline_dt = datetime.datetime.combine(deadline, datetime.time(23, 59, 59))
                     deadline_str = deadline_dt.isoformat()
-                    
                     full_desc = f"【报酬：{task_reward if task_reward else '面议'}】\n{task_desc}"
-                    if utils.add_task(task_title, full_desc, st.session_state.nickname, deadline_str):
+                    
+                    if utils.add_task(task_title, full_desc, st.session_state.nickname, deadline_str, image_url):
                         st.success("发布成功！")
                         st.rerun()
                     else:
@@ -55,8 +76,12 @@ def render():
     else:
         for task in tasks:
             with st.container(border=True):
+                # 显示缩略图（如果存在）
+                if task.get('image_url'):
+                    st.image(task['image_url'], width=200, caption="配图")
+                    
                 col_left, col_right = st.columns([4, 1])
-                with col_left:
+                with col_left:  
                     st.markdown(f"🟢 **{task['title']}**")
                     st.caption(f"👤 {task['publisher']}  |  🕒 {task['pub_time']}")
                     if task.get('deadline'):
