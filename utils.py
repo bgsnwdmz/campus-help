@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import datetime
 import io
+import re
 from PIL import Image
 
 # ---------- 配置 ----------
@@ -23,22 +24,54 @@ def get_headers():
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
+def validate_student_id(sid):
+    """
+    验证学号格式
+    默认规则：10 位纯数字（例如 2024010101）
+    
+    🔥 重要：请根据广幼实际学号规则修改下面的正则表达式！
+    常见格式：
+    - 10 位纯数字：^\d{10}$
+    - 12 位纯数字：^\d{12}$
+    - 以 2024 开头的 10 位：^2024\d{6}$
+    - 字母+数字组合：^[A-Z0-9]{10}$
+    """
+    if not sid or not sid.strip():
+        return False, "学号不能为空"
+    
+    # 去掉首尾空格
+    sid = sid.strip()
+    
+    # 🔥🔥🔥 在这里改你的学校学号规则 🔥🔥🔥
+    pattern = r'^\d{12}$'  
+    if re.match(pattern, sid):
+        return True, sid
+    else:
+        return False, "学号格式不正确（请输入12位数字学号）"
+
 # ---------- 用户相关 ----------
-def register_user(username, password, nickname):
+def register_user(username, password, nickname, student_id):
     url = f"{SUPABASE_URL}/users"
     now = datetime.datetime.now().isoformat()
     data = {
         "username": username,
         "password": hash_password(password),
         "nickname": nickname,
+        "student_id": student_id.strip(),
         "last_task_visit": now,
         "last_post_visit": now
     }
     try:
         response = requests.post(url, headers=get_headers(), json=data)
-        return response.status_code in [200, 201]
-    except:
-        return False
+        if response.status_code in [200, 201]:
+            return True, "注册成功"
+        elif response.status_code == 409 or "duplicate key" in response.text:
+            # 学号或用户名重复
+            return False, "学号已被注册，请确认是否正确"
+        else:
+            return False, f"注册失败（{response.status_code}）"
+    except Exception as e:
+        return False, f"网络错误：{str(e)}"
 
 def login_user(username, password):
     url = f"{SUPABASE_URL}/users?select=nickname,last_task_visit,last_post_visit&username=eq.{username}&password=eq.{hash_password(password)}"
@@ -615,20 +648,53 @@ def get_public_tasks_page(page=1, per_page=10):
     except:
         return [], 0
 
-def get_all_posts_page(page=1, per_page=10):
-    """分页获取正常帖子，按创建时间降序，返回 (posts, total_count)"""
+@st.cache_data(ttl=60)  # 缓存 60 秒，避免频繁筛选时重复请求
+def get_all_posts_page(page=1, per_page=10, sort_by="最新", category="全部"):
+    """
+    分页获取帖子，支持按分类筛选和排序
+    - sort_by: "最新" 或 "最热"
+    - category: "全部" 或 具体分类名称
+    """
     offset = (page - 1) * per_page
-    url_posts = f"{SUPABASE_URL}/posts?select=*&status=eq.正常&order=created_at.desc&limit={per_page}&offset={offset}"
+    
+    # ---------- 1. 构建查询条件 ----------
+    # 基础条件：正常状态的帖子
+    base_filters = "status=eq.正常"
+    
+    # 分类筛选（如果不是“全部”）
+    if category != "全部" and category:
+        base_filters += f"&category=eq.{category}"
+    
+    # ---------- 2. 构建排序规则 ----------
+    if sort_by == "最热":
+        order_clause = "order=like_count.desc,created_at.desc"  # 点赞数降序，相同时按时间降序
+    else:  # 默认“最新”
+        order_clause = "order=created_at.desc"
+    
+    # ---------- 3. 查询主数据 ----------
+    url_posts = (
+        f"{SUPABASE_URL}/posts"
+        f"?select=*"
+        f"&{base_filters}"
+        f"&{order_clause}"
+        f"&limit={per_page}"
+        f"&offset={offset}"
+    )
+    
     try:
         response = requests.get(url_posts, headers=get_headers())
         if response.status_code != 200:
             return [], 0
         posts = response.json()
-        # 补充评论数和显示名称
+        
+        # 补充评论数和显示名称（原逻辑保持不变）
         for post in posts:
+            # 获取评论数
             url_count = f"{SUPABASE_URL}/comments?select=id&post_id=eq.{post['id']}&status=eq.正常"
             count_resp = requests.get(url_count, headers=get_headers())
             post["comment_count"] = len(count_resp.json()) if count_resp.status_code == 200 else 0
+            
+            # 获取显示名称
             if post["is_anonymous"]:
                 post["display_name"] = "匿名同学"
             else:
@@ -638,21 +704,22 @@ def get_all_posts_page(page=1, per_page=10):
                     post["display_name"] = user_resp.json()[0]["nickname"]
                 else:
                     post["display_name"] = post["user_id"]
-        # 获取总数
-        count_url = f"{SUPABASE_URL}/posts?select=id&status=eq.正常"
+        
+        # ---------- 4. 获取总数（必须应用相同的筛选条件，否则分页按钮会出错） ----------
+        count_url = f"{SUPABASE_URL}/posts?select=id&{base_filters}"
         count_resp = requests.get(count_url, headers=get_headers())
         total = len(count_resp.json()) if count_resp.status_code == 200 else 0
+        
         return posts, total
-    except:
-        return [], 0       
+    except Exception as e:
+        # 如果出错，打印一下错误方便排查（但不要影响前端显示）
+        print(f"get_all_posts_page 报错: {e}")
+        return [], 0
 
- # ==========================================
-# 追加到 utils.py 末尾（管理员相关）
-# ==========================================
 
 # ---------- 管理员配置（硬编码白名单，后续可迁移到数据库） ----------
-# 🔥 重要：把下面列表里的 "你的用户名" 改成你自己的登录账号！
-ADMIN_WHITELIST = ["1", "admin"]  # 可以加多个
+# 🔥 重要：把下面列表里的 "你的用户名：nickname " 改成你自己的登录账号！
+ADMIN_WHITELIST = ["浪迹天涯", "admin"]  # 可以加多个
 
 def is_admin_user(username):
     """判断当前用户是否为管理员"""

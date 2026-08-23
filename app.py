@@ -104,14 +104,25 @@ if not st.session_state.logged_in:
             new_user = st.text_input("设置账号")
             new_pwd = st.text_input("设置密码", type="password")
             new_nick = st.text_input("昵称")
+            
+            # ---------- 新增：学号输入 ----------
+            new_student_id = st.text_input(
+                "学号", 
+                placeholder="请输入你的学号",
+                help="学号用于验证你的学生身份，请务必填写正确"
+            )
+            
             if st.form_submit_button("注册"):
-                if new_user and new_pwd and new_nick:
-                    if utils.register_user(new_user, new_pwd, new_nick):
-                        st.success("注册成功，请登录！")
-                    else:
-                        st.error("账号已存在")
+                # 1. 检查是否填完整
+                if not (new_user and new_pwd and new_nick and new_student_id):
+                    st.warning("请填完整所有字段（包括学号）")
                 else:
-                    st.warning("请填完整")
+                    # 2. 调用注册函数（现在返回两个值：成功标志 + 消息）
+                    success, msg = utils.register_user(new_user, new_pwd, new_nick, new_student_id)
+                    if success:
+                        st.success("注册成功！请登录")
+                    else:
+                        st.error(msg)  # 显示具体错误（如"学号已被注册"）
     
     st.sidebar.info("👈 注册登录后使用完整功能")
     st.stop()  # 阻止后续代码执行
