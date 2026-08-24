@@ -113,7 +113,8 @@ def render():
         # ----- 列表模式 -----
         if 'post_page' not in st.session_state:
             st.session_state.post_page = 1
-        
+
+        st.markdown('<a id="top"></a>', unsafe_allow_html=True)
         st.title("🎉 校园圈")
         st.caption("匿名吐槽 · 实名评论 · 分享校园生活")
         
@@ -160,32 +161,34 @@ def render():
                         st.warning("内容不能为空")
 
            # ---------- 新增：排序 + 分类筛选 ----------
-        col_sort, col_category = st.columns(2)
-        
+        col_sort, col_category, col_search = st.columns([1, 1, 2])
         with col_sort:
             sort_option = st.selectbox(
                 "📊 排序方式", 
                 ["最新", "最热"], 
-                key="sort_posts",
-                help="按发布时间排序，或按点赞数从多到少排序"
-            )
-        
+                key="sort_posts"
+        )
         with col_category:
-            # 获取分类列表（复用 utils 中的函数）
             category_list = ["全部"] + utils.get_category_labels()
             category_option = st.selectbox(
                 "🏷️ 分类筛选", 
                 category_list, 
-                key="cat_posts",
-                help="只查看特定分类的帖子"
-            )
+                key="cat_posts"
+        )
+        with col_search:
+            search_keyword = st.text_input(
+                "🔍 搜索帖子", 
+                placeholder="输入关键词搜索内容...",
+                key="post_search_input"
+        )
         
         # ---------- 关键：把筛选和排序参数传给查询函数 ----------
         posts, total = utils.get_all_posts_page(
             st.session_state.post_page, 
             per_page=10,
             sort_by=sort_option,
-            category=category_option
+            category=category_option,
+            keyword=search_keyword
         )
         # 帖子列表（分页加载）
         
@@ -237,6 +240,7 @@ def render():
                                     st.rerun()
                                 else:
                                     st.error(msg)
+
             
             # 加载更多
             if st.session_state.post_page * 10 < total:
@@ -245,3 +249,10 @@ def render():
                     st.rerun()
             else:
                 st.caption("— 已加载全部帖子 —")
+         # ---------- 回顶部按钮 ----------
+    st.markdown(
+        '<a href="#top" style="display:block;text-align:center;padding:12px;'
+        'background:#f0f2f6;border-radius:8px;text-decoration:none;color:#333;'
+        'margin-top:20px;font-size:16px;">⬆ 回到顶部</a>',
+        unsafe_allow_html=True
+    )           

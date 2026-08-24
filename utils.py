@@ -25,17 +25,7 @@ def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 def validate_student_id(sid):
-    """
-    验证学号格式
-    默认规则：10 位纯数字（例如 2024010101）
     
-    🔥 重要：请根据广幼实际学号规则修改下面的正则表达式！
-    常见格式：
-    - 10 位纯数字：^\d{10}$
-    - 12 位纯数字：^\d{12}$
-    - 以 2024 开头的 10 位：^2024\d{6}$
-    - 字母+数字组合：^[A-Z0-9]{10}$
-    """
     if not sid or not sid.strip():
         return False, "学号不能为空"
     
@@ -632,50 +622,83 @@ def submit_feedback(user_id, content):
     except:
         return False
 
-# ---------- 分页查询 ----------
-def get_public_tasks_page(page=1, per_page=10):
+# ==========================================
+# 替换 get_public_tasks_page（支持搜索 + 排序）
+# ==========================================
+def get_public_tasks_page(page=1, per_page=10, sort_by="最新发布", keyword=""):
     offset = (page - 1) * per_page
     now = datetime.datetime.now().isoformat()
-    url = f"{SUPABASE_URL}/tasks?select=id,title,description,publisher,pub_time,image_url&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})&order=id.desc&limit={per_page}&offset={offset}"
+    
+    # ---------- 1. 构建筛选条件 ----------
+    # 基础：待接单 + 未过期
+    filters = "status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})"
+    
+    # 关键词搜索（标题或描述包含关键词）
+    if keyword and keyword.strip():
+        keyword = keyword.strip()
+        # 使用 ilike 模糊匹配（%keyword%）
+        filters += f"&or=(title.ilike.*{keyword}*,description.ilike.*{keyword}*)"
+    
+    # ---------- 2. 构建排序 ----------
+    if sort_by == "即将截止":
+        order_clause = "order=deadline.asc.nullslast"  # 截止时间升序，空值排最后
+    else:  # "最新发布"
+        order_clause = "order=id.desc"  # ID 降序 = 最新发布
+    
+    # ---------- 3. 查询数据 ----------
+    url = (
+        f"{SUPABASE_URL}/tasks"
+        f"?select=id,title,description,publisher,pub_time,deadline,image_url"
+        f"&{filters}"
+        f"&{order_clause}"
+        f"&limit={per_page}"
+        f"&offset={offset}"
+    )
+    
     try:
         response = requests.get(url, headers=get_headers())
         tasks = response.json() if response.status_code == 200 else []
-        # 获取总数（同样要过滤过期）
-        count_url = f"{SUPABASE_URL}/tasks?select=id&status=eq.待接单&or=(deadline.is.null,deadline.gt.{now})"
+        
+        # ---------- 4. 获取总数（同样应用筛选） ----------
+        count_url = f"{SUPABASE_URL}/tasks?select=id&{filters}"
         count_resp = requests.get(count_url, headers=get_headers())
         total = len(count_resp.json()) if count_resp.status_code == 200 else 0
+        
         return tasks, total
-    except:
+    except Exception as e:
+        print(f"get_public_tasks_page 报错: {e}")
         return [], 0
 
-@st.cache_data(ttl=60)  # 缓存 60 秒，避免频繁筛选时重复请求
-def get_all_posts_page(page=1, per_page=10, sort_by="最新", category="全部"):
-    """
-    分页获取帖子，支持按分类筛选和排序
-    - sort_by: "最新" 或 "最热"
-    - category: "全部" 或 具体分类名称
-    """
+
+# ==========================================
+# 替换 get_all_posts_page（支持搜索）
+# ==========================================
+def get_all_posts_page(page=1, per_page=10, sort_by="最新", category="全部", keyword=""):
     offset = (page - 1) * per_page
     
-    # ---------- 1. 构建查询条件 ----------
-    # 基础条件：正常状态的帖子
-    base_filters = "status=eq.正常"
+    # ---------- 1. 构建筛选条件 ----------
+    filters = "status=eq.正常"
     
-    # 分类筛选（如果不是“全部”）
-    if category != "全部" and category:
-        base_filters += f"&category=eq.{category}"
+    # 分类筛选
+    if category and category != "全部":
+        filters += f"&category=eq.{category}"
     
-    # ---------- 2. 构建排序规则 ----------
+    # 关键词搜索（内容包含关键词）
+    if keyword and keyword.strip():
+        keyword = keyword.strip()
+        filters += f"&content.ilike.*{keyword}*"
+    
+    # ---------- 2. 构建排序 ----------
     if sort_by == "最热":
-        order_clause = "order=like_count.desc,created_at.desc"  # 点赞数降序，相同时按时间降序
-    else:  # 默认“最新”
+        order_clause = "order=like_count.desc,created_at.desc"
+    else:  # "最新"
         order_clause = "order=created_at.desc"
     
-    # ---------- 3. 查询主数据 ----------
+    # ---------- 3. 查询数据 ----------
     url_posts = (
         f"{SUPABASE_URL}/posts"
         f"?select=*"
-        f"&{base_filters}"
+        f"&{filters}"
         f"&{order_clause}"
         f"&limit={per_page}"
         f"&offset={offset}"
@@ -687,14 +710,12 @@ def get_all_posts_page(page=1, per_page=10, sort_by="最新", category="全部")
             return [], 0
         posts = response.json()
         
-        # 补充评论数和显示名称（原逻辑保持不变）
+        # 补充评论数和显示名称
         for post in posts:
-            # 获取评论数
             url_count = f"{SUPABASE_URL}/comments?select=id&post_id=eq.{post['id']}&status=eq.正常"
             count_resp = requests.get(url_count, headers=get_headers())
             post["comment_count"] = len(count_resp.json()) if count_resp.status_code == 200 else 0
             
-            # 获取显示名称
             if post["is_anonymous"]:
                 post["display_name"] = "匿名同学"
             else:
@@ -705,14 +726,13 @@ def get_all_posts_page(page=1, per_page=10, sort_by="最新", category="全部")
                 else:
                     post["display_name"] = post["user_id"]
         
-        # ---------- 4. 获取总数（必须应用相同的筛选条件，否则分页按钮会出错） ----------
-        count_url = f"{SUPABASE_URL}/posts?select=id&{base_filters}"
+        # 获取总数（同样应用筛选）
+        count_url = f"{SUPABASE_URL}/posts?select=id&{filters}"
         count_resp = requests.get(count_url, headers=get_headers())
         total = len(count_resp.json()) if count_resp.status_code == 200 else 0
         
         return posts, total
     except Exception as e:
-        # 如果出错，打印一下错误方便排查（但不要影响前端显示）
         print(f"get_all_posts_page 报错: {e}")
         return [], 0
 

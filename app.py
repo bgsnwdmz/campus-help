@@ -7,6 +7,29 @@ import utils  # 只导入工具函数（登录、注册用）
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="广幼校园互助站", page_icon="🏫")
 
+st.markdown("""
+<style>
+    /* 回顶部按钮在手机端更友好 */
+    a[href="#top"] {
+        font-size: 16px !important;
+        padding: 14px !important;
+        border-radius: 12px !important;
+        background: #e8ecf1 !important;
+        transition: background 0.2s;
+    }
+    a[href="#top"]:hover {
+        background: #d0d5dd !important;
+    }
+    /* 手机端适配 */
+    @media (max-width: 768px) {
+        a[href="#top"] {
+            font-size: 14px !important;
+            padding: 12px !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- 初始化 Session ----------
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False

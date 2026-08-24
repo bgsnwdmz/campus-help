@@ -1,5 +1,5 @@
 # ==========================================
-# task_page.py - 任务广场页面
+# task_page.py - 任务广场页面（升级版）
 # ==========================================
 import streamlit as st
 import utils
@@ -9,10 +9,13 @@ def render():
     # 进入页面时，清除红点
     utils.update_user_visit_time(st.session_state.nickname, "task")
     
+    # ---------- 页面顶部锚点（回顶部用） ----------
+    st.markdown('<a id="top"></a>', unsafe_allow_html=True)
+    
     st.title("🏫 任务广场")
     st.caption("这里只显示「待接单」的需求，先到先得！")
     
-    # 发布表单
+    # ---------- 发布表单 ----------
     with st.expander("📝 发布新需求", expanded=False):
         with st.form("publish_form"):
             col1, col2 = st.columns([3, 1])
@@ -20,29 +23,25 @@ def render():
                 task_title = st.text_input("标题", placeholder="例如：代拿,代买,跑腿等")
             with col2:
                 task_reward = st.text_input("报酬", placeholder="例如：5元")
-            task_desc = st.text_area("描述", placeholder="详细描述你的需求...可附上联系方式，网站也可以私聊就是需要刷新")
+            task_desc = st.text_area("描述", placeholder="详细描述你的需求...可附上联系方式")
             
-            # ---------- 截止时间（必填，默认今天） ----------
             deadline = st.date_input(
                 "截止日期（必填）", 
                 value=datetime.date.today(),
-                help="超过此日期任务将自动从广场消失，建议选明天或更晚"  
+                help="超过此日期任务将自动从广场消失"
             )
-            # ---------- 图片上传 ----------
+            
             uploaded_file = st.file_uploader(
                 "📷 配图（可选）", 
                 type=["jpg", "jpeg", "png", "webp"],
                 help="上传图片，系统会自动压缩"
-)
+            )
             
             if st.form_submit_button("发布"):
                 if task_title and task_desc:
-                    # 处理图片上传
                     image_url = None
                     if uploaded_file is not None:
-                        # 读取文件字节
                         file_bytes = uploaded_file.getvalue()
-                        # 上传到 Supabase
                         image_url = utils.upload_image_to_supabase(
                             file_bytes, 
                             "task_images", 
@@ -65,18 +64,38 @@ def render():
                 else:
                     st.warning("请填完整")
     
+    # ---------- 搜索 + 排序（新增） ----------
+    col_search, col_sort = st.columns([3, 1])
+    with col_search:
+        search_keyword = st.text_input(
+            "🔍 搜索任务", 
+            placeholder="输入关键词搜索标题或描述...",
+            key="task_search_input"
+        )
+    with col_sort:
+        sort_option = st.selectbox(
+            "排序方式",
+            ["最新发布", "即将截止"],
+            key="task_sort_select"
+        )
+    
     # ---------- 任务列表（分页加载） ----------
     if 'task_page' not in st.session_state:
         st.session_state.task_page = 1
-
-    tasks, total = utils.get_public_tasks_page(st.session_state.task_page, per_page=10)
-
+    
+    # 调用升级后的查询函数
+    tasks, total = utils.get_public_tasks_page(
+        st.session_state.task_page, 
+        per_page=10,
+        sort_by=sort_option,
+        keyword=search_keyword
+    )
+    
     if not tasks:
-        st.info("🎉 广场很干净，暂无待接单的需求。")
+        st.info("🎉 没有找到匹配的任务")
     else:
         for task in tasks:
             with st.container(border=True):
-                # 显示缩略图（如果存在）
                 if task.get('image_url'):
                     st.image(task['image_url'], width=200, caption="配图")
                     
@@ -104,11 +123,19 @@ def render():
                                 st.rerun()
                             else:
                                 st.error(msg)
-
-        # 判断是否还有更多
+        
+        # 加载更多
         if st.session_state.task_page * 10 < total:
             if st.button("📥 加载更多任务"):
                 st.session_state.task_page += 1
                 st.rerun()
         else:
             st.caption("— 已加载全部任务 —")
+    
+    # ---------- 回顶部按钮 ----------
+    st.markdown(
+        '<a href="#top" style="display:block;text-align:center;padding:12px;'
+        'background:#f0f2f6;border-radius:8px;text-decoration:none;color:#333;'
+        'margin-top:20px;font-size:16px;">⬆ 回到顶部</a>',
+        unsafe_allow_html=True
+    )
