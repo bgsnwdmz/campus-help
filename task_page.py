@@ -20,7 +20,7 @@ def render():
         with st.form("publish_form"):
             col1, col2 = st.columns([3, 1])
             with col1:
-                task_title = st.text_input("标题", placeholder="例如：代拿,代买,跑腿等")
+                task_title = st.text_input("标题", placeholder="例如：代拿,代买,跑腿，出东西，求购等")
             with col2:
                 task_reward = st.text_input("报酬", placeholder="例如：5元")
             task_desc = st.text_area("描述", placeholder="详细描述你的需求...可附上联系方式")
